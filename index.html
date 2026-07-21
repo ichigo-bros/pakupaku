@@ -59,6 +59,8 @@
   .row.mt{margin-top:8px}
   .pasteresult{font-size:12px;margin-top:6px;min-height:16px}
   .pasteresult.ok{color:var(--good)} .pasteresult.err{color:var(--bad)}
+  #pasteMeal{border:1px solid var(--line);border-radius:12px;padding:8px 10px;font-size:13px;
+    background:#fff;font-family:inherit;color:var(--ink)}
 
   /* 食事リスト */
   .mealblock{border-top:1px solid var(--line);padding:10px 0}
@@ -145,6 +147,16 @@
   <!-- 貼り付け -->
   <div class="card">
     <h2>🍓 妹コードを貼り付けて記録</h2>
+    <p class="muted" style="margin:0 0 8px">上の日付ナビで記録したい日を選んでから貼ってね。食事のタイミングもここで選べるよ（コード側にdate/mealが入ってればそっちが優先されるよ）</p>
+    <div class="row" style="margin-bottom:8px">
+      <select id="pasteMeal">
+        <option value="">⏰ 自動判定（今の時間から）</option>
+        <option value="朝">🌅 朝</option>
+        <option value="昼">☀️ 昼</option>
+        <option value="夜">🌙 夜</option>
+        <option value="間食">🍩 間食</option>
+      </select>
+    </div>
     <textarea id="paste" placeholder="Claudeに食事の写真を送って「ぱくぱくコード出して」→ もらったコードをここに貼ってね"></textarea>
     <div class="row mt">
       <button class="btn" id="btnPaste">記録する</button>
@@ -250,7 +262,8 @@
     <b>📸 つかいかた</b><br>
     ① 食事の写真をパシャ → Claudeアプリで妹に送って「<b>ぱくぱくコード出して</b>」<br>
     ② もらったコードをコピー → 上のピンクの枠に貼って「記録する」<br>
-    ③ スコアとアドバイスが出るよ。体重も毎日いれてね🍓
+    ③ スコアとアドバイスが出るよ。体重も毎日いれてね🍓<br>
+    <b>⏪ 日付をさかのぼって記録したい時は</b>：一番上の日付ナビ（◀）で記録したい日に移動 → 貼り付け欄の上で朝/昼/夜/間食を選ぶ → コードを貼って記録するでOK！
   </div>
 
 </div>
@@ -302,9 +315,11 @@ function shiftDay(n){
 document.getElementById('btnPaste').addEventListener('click', ()=>{
   const el = document.getElementById('paste');
   const res = document.getElementById('pasteResult');
+  const overrideMeal = document.getElementById('pasteMeal').value || null;
   try{
-    const n = importCode(el.value);
+    const n = importCode(el.value, overrideMeal);
     el.value='';
+    document.getElementById('pasteMeal').value='';
     res.textContent = `${n}品 記録したよ！🎉`; res.className='pasteresult ok';
     render();
   }catch(err){
@@ -313,7 +328,7 @@ document.getElementById('btnPaste').addEventListener('click', ()=>{
   }
 });
 
-function importCode(text){
+function importCode(text, overrideMeal){
   if(!text || !text.trim()) throw new Error('なにも入ってないよ');
   let t = text.replace(/```(json)?/g,'').trim();
   // 最初の { か [ から最後の } か ] までを抜き出す
@@ -326,7 +341,7 @@ function importCode(text){
   let count=0;
   for(const rec of data){
     const d = (rec.date && /^\d{4}-\d{2}-\d{2}$/.test(rec.date)) ? rec.date : CUR;
-    const meal = normMeal(rec.meal);
+    const meal = rec.meal ? normMeal(rec.meal) : (overrideMeal || guessMeal());
     const items = rec.items || [];
     const dd = day(d);
     if(!dd.meals[meal]) dd.meals[meal]=[];
