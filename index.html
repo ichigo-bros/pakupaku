@@ -72,6 +72,8 @@
     padding:6px 0 6px 8px;font-size:14px}
   .fooditem .info small{color:var(--sub);font-size:11px;display:block}
   .fooditem .del{border:none;background:none;color:#ccd4dd;font-size:16px;cursor:pointer;padding:4px 8px}
+  .fooditem .qty{border:1px solid var(--line);border-radius:9px;padding:4px 6px;font-size:12px;
+    background:#fff;font-family:inherit;color:var(--sub);flex-shrink:0}
   .mealcomment{font-size:12px;color:#a8779a;background:#fdf3f8;border-radius:8px;padding:6px 10px;margin-top:4px}
 
   /* 栄養バー */
@@ -427,33 +429,33 @@ function scoreOf(d){
   const T = DB.targets;
   let pts = 0; const issues = [];
 
-  // カロリー 30点（目標の85〜105%が満点、オーバーは厳しめ＝ダイエット仕様）
+  // カロリー 30点（目標の75〜110%が満点。外れても急には落ちないゆるめカーブ）
   const r = t.kcal / T.kcal;
-  if(r>=0.85 && r<=1.05) pts+=30;
-  else if(r<0.85){ pts += Math.max(0, 30*(r/0.85)); if(r<0.6) issues.push(['kcal-low','ちょっと食べなさすぎかも？無理な減らしすぎはリバウンドのもとだよ！']); }
-  else { pts += Math.max(0, 30 - (r-1.05)*120); issues.push(['kcal-over',`カロリーオーバー気味…目標より${Math.round(t.kcal-T.kcal)}kcal多いよ。夜を軽めにしてみよ？`]); }
+  if(r>=0.75 && r<=1.10) pts+=30;
+  else if(r<0.75){ pts += Math.max(0, 30 - (0.75-r)*60); if(r<0.55) issues.push(['kcal-low','ちょっと食べなさすぎかも？無理な減らしすぎはリバウンドのもとだよ！']); }
+  else { pts += Math.max(0, 30 - (r-1.10)*60); if(r>1.20) issues.push(['kcal-over',`カロリーオーバー気味…目標より${Math.round(t.kcal-T.kcal)}kcal多いよ。夜を軽めにしてみよ？`]); }
 
   // たんぱく質 15点（目標以上で満点）
   const rp = t.p / T.p;
-  pts += Math.min(15, 15*rp);
+  pts += Math.min(15, 15*(rp/0.9));
   if(rp<0.7) issues.push(['p-low','たんぱく質が足りないよ〜。お肉・お魚・卵・豆腐をプラスしよ！筋肉が減るとやせにくくなるからね']);
 
-  // 脂質 10点（上限以内で満点）
-  if(t.f<=T.f) pts+=10;
-  else { pts+=Math.max(0, 10-(t.f-T.f)*0.3); issues.push(['f-over','脂質がちょっと多めかな。揚げ物は明日はお休みにしよっ']); }
+  // 脂質 10点（上限＋10%までは満点、そこから緩やかに）
+  if(t.f<=T.f*1.10) pts+=10;
+  else { pts+=Math.max(0, 10-(t.f-T.f*1.10)*0.2); issues.push(['f-over','脂質がちょっと多めかな。揚げ物は明日はお休みにしよっ']); }
 
-  // 塩分 15点
-  if(t.salt<=T.salt) pts+=15;
-  else { pts+=Math.max(0, 15-(t.salt-T.salt)*3); issues.push(['salt-over','塩分とりすぎ注意！汁物のスープは残すのがコツだよ']); }
+  // 塩分 15点（上限＋10%までは満点）
+  if(t.salt<=T.salt*1.10) pts+=15;
+  else { pts+=Math.max(0, 15-(t.salt-T.salt*1.10)*2); issues.push(['salt-over','塩分とりすぎ注意！汁物のスープは残すのがコツだよ']); }
 
   // 食物繊維 15点
   const rf = t.fib / T.fib;
-  pts += Math.min(15, 15*rf);
+  pts += Math.min(15, 15*(rf/0.9));
   if(rf<0.6) issues.push(['fib-low','食物繊維が少なめ…野菜・きのこ・海藻をもう一皿！お通じにも効くよ🥦']);
 
-  // 糖質 15点
-  if(t.sugar<=T.sugar) pts+=15;
-  else { pts+=Math.max(0, 15-(t.sugar-T.sugar)*0.15); issues.push(['sugar-over','糖質が多めだよ。ごはんの量をちょっとだけ減らしてみる？']); }
+  // 糖質 15点（上限＋10%までは満点）
+  if(t.sugar<=T.sugar*1.10) pts+=15;
+  else { pts+=Math.max(0, 15-(t.sugar-T.sugar*1.10)*0.1); issues.push(['sugar-over','糖質が多めだよ。ごはんの量をちょっとだけ減らしてみる？']); }
 
   return {score: Math.round(Math.min(100,Math.max(0,pts))), issues, totals:t};
 }
@@ -514,8 +516,13 @@ function renderMeals(){
     const kc = items.reduce((s,i)=>s+i.kcal,0);
     html += `<div class="mealblock"><div class="mealhead"><span class="nm">${mealIcon(m)} ${m}</span><span class="kc">${Math.round(kc)} kcal</span></div>`;
     items.forEach((it,idx)=>{
+      const q = it.q || 1;
+      const opts = QTY_OPTS.map(v=>`<option value="${v}"${v===q?' selected':''}>×${v}</option>`).join('')
+        + (QTY_OPTS.indexOf(q)<0 ? `<option value="${q}" selected>×${q}</option>` : '')
+        + '<option value="custom">その他…</option>';
       html += `<div class="fooditem"><div class="info">${esc(it.n)}
         <small>${Math.round(it.kcal)}kcal ／ P${it.p} F${it.f} C${it.c} ／ 塩${it.salt}g</small></div>
+        <select class="qty" data-m="${m}" data-i="${idx}">${opts}</select>
         <button class="del" data-m="${m}" data-i="${idx}">✕</button></div>`;
     });
     html += '</div>';
@@ -527,6 +534,34 @@ function renderMeals(){
     if(dd.meals[b.dataset.m].length===0) delete dd.meals[b.dataset.m];
     save(); render();
   }));
+  box.querySelectorAll('.qty').forEach(s=>s.addEventListener('change', ()=>{
+    let v = s.value;
+    if(v==='custom'){
+      const inp = prompt('何人前にする？（例: 0.75、1.5、3）');
+      if(inp===null){ render(); return; }
+      v = parseFloat(inp);
+      if(!isFinite(v) || v<=0){ alert('数字で入れてね〜'); render(); return; }
+      v = Math.round(v*100)/100;
+    }
+    setQty(s.dataset.m, +s.dataset.i, +v);
+  }));
+}
+
+/* 分量（何人前）の変更。初回に基準値をbaseとして保存してから倍率をかける */
+const QTY_OPTS = [0.25,0.5,0.75,1,1.5,2,2.5,3];
+function setQty(meal, idx, q){
+  const dd = day(CUR);
+  const it = dd.meals[meal] && dd.meals[meal][idx];
+  if(!it) return;
+  if(!it.base){
+    const cur = it.q || 1;
+    it.base = {kcal:it.kcal/cur, p:it.p/cur, f:it.f/cur, c:it.c/cur, salt:it.salt/cur, fib:it.fib/cur};
+  }
+  const rd = x => Math.round(x*10)/10;
+  it.q = q;
+  it.kcal = rd(it.base.kcal*q); it.p = rd(it.base.p*q); it.f = rd(it.base.f*q);
+  it.c = rd(it.base.c*q); it.salt = rd(it.base.salt*q); it.fib = rd(it.base.fib*q);
+  save(); render();
 }
 function mealIcon(m){ return {朝:'🌅',昼:'☀️',夜:'🌙',間食:'🍩'}[m]||''; }
 
