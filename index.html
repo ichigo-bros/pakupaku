@@ -45,6 +45,22 @@
   .advice{font-size:13px;flex:1}
   .advice .face{font-size:15px;font-weight:700;margin-bottom:2px}
 
+  /* 妹キャラ */
+  .imouto{display:flex;align-items:flex-end;gap:10px;margin-top:14px;
+    padding-top:12px;border-top:1px dashed #ffd9e2}
+  .imouto-avatar{width:76px;height:76px;flex-shrink:0;border-radius:50%;overflow:hidden;
+    background:#fff0f4;border:2px solid #ffd0dd;box-shadow:0 2px 6px rgba(255,107,138,.15)}
+  .imouto-avatar img{width:100%;height:100%;object-fit:cover;display:block;
+    animation:popin .35s ease}
+  .imouto-bubble{position:relative;flex:1;background:#fff5f8;border:1px solid #ffd0dd;
+    border-radius:14px;padding:10px 12px;font-size:13px;line-height:1.6;color:#7a4a5c;
+    min-height:44px;animation:popin .35s ease}
+  .imouto-bubble::before{content:'';position:absolute;left:-7px;bottom:16px;width:0;height:0;
+    border-top:6px solid transparent;border-bottom:6px solid transparent;border-right:8px solid #ffd0dd}
+  .imouto-bubble::after{content:'';position:absolute;left:-6px;bottom:16px;width:0;height:0;
+    border-top:6px solid transparent;border-bottom:6px solid transparent;border-right:8px solid #fff5f8}
+  @keyframes popin{from{opacity:0;transform:translateY(4px) scale(.97)}to{opacity:1;transform:none}}
+
   /* 貼り付け */
   textarea{width:100%;border:2px dashed #ffb7c6;border-radius:12px;background:#fff7f9;
     padding:10px;font-size:14px;font-family:inherit;min-height:64px;color:var(--ink)}
@@ -143,6 +159,10 @@
         <div class="face" id="adviceFace">きょうも記録がんばろ！</div>
         <div id="adviceText" class="muted">食事を記録するとスコアとアドバイスが出るよ。</div>
       </div>
+    </div>
+    <div class="imouto">
+      <div class="imouto-avatar" id="imoutoAvatar"></div>
+      <div class="imouto-bubble" id="imoutoBubble">おかえり、お兄ちゃん！<br>きょうもいっしょに記録がんばろ〜🍓</div>
     </div>
   </div>
 
@@ -469,6 +489,62 @@ function faceOf(s){
 }
 
 /* ============================================================
+   妹キャラ（SVG）— スコアで表情がかわるよ
+   ============================================================ */
+function moodOf(s){
+  if(s===null) return 'idle';
+  if(s>=90) return 'great';
+  if(s>=75) return 'happy';
+  if(s>=60) return 'normal';
+  if(s>=40) return 'worry';
+  return 'sad';
+}
+
+function imoutoImgSrc(mood){
+  return 'chars/' + mood + '.png';
+}
+/* 妹のひとこと（スコア＋その日の課題から選ぶ） */
+function imoutoLine(sc){
+  if(!sc) return 'おかえり、お兄ちゃん！<br>きょうもいっしょに記録がんばろ〜🍓';
+  const s = sc.score, t = sc.totals, T = DB.targets;
+  const kinds = sc.issues.map(i=>i[0]);
+  const pick = a => a[Math.floor(Math.random()*a.length)];
+
+  // まず気になるところがあればそこを一言
+  if(kinds.indexOf('kcal-over')>=0)
+    return pick(['きょうはちょっと食べすぎかも〜。<br>あしたは軽めにしよ？いっしょにがんばろ！',
+      'カロリーオーバーぎみだけど、<br>たまにはいい日もあるよ！むりしないでね🍓']);
+  if(kinds.indexOf('kcal-low')>=0)
+    return pick(['お兄ちゃん、あんまり食べてないよ…？<br>ちゃんと食べないと体こわしちゃう！',
+      'たりてないみたい…。<br>むりな減らしすぎはダメだからね？']);
+  if(kinds.indexOf('p-low')>=0)
+    return pick(['たんぱく質がちょっと少ないかも。<br>ゆで卵ひとつ足すだけでちがうよ〜💪',
+      'せっかく鍛えてるんだから、<br>たんぱく質もうちょっと摂ろ？おねがい！']);
+  if(kinds.indexOf('salt-over')>=0)
+    return pick(['塩分たかめ…！<br>おみそ汁とかスープ、のこすのがコツだよ〜',
+      'しょっぱいもの多かったね。<br>あしたは薄味でいこ？']);
+  if(kinds.indexOf('f-over')>=0)
+    return pick(['あぶらもの多めだったかな〜。<br>あしたは蒸し料理とかどう？',
+      '脂質ちょっと乗ってるね。<br>でもおいしかったならヨシ！🍓']);
+  if(kinds.indexOf('sugar-over')>=0)
+    return pick(['あまいもの、いっぱい食べたね〜ふふ。<br>あしたはひかえめにしよっか！',
+      '糖質おおめ！ごはんちょっとだけ減らすと<br>ぐっと変わるよ〜']);
+  if(kinds.indexOf('fib-low')>=0)
+    return pick(['食物繊維がすくないかも。<br>野菜と海藻、たしてみて〜🥦',
+      'おなかの調子のために<br>きのこや野菜もたべてほしいな！']);
+
+  // 問題なしのときはスコアでほめる
+  if(s>=90) return pick(['すっごーい！ほぼ完璧だよお兄ちゃん！<br>わたし、ほんとにうれしい🍓',
+    'かんぺき！！<br>この調子ならぜったい結果でるよ〜💮']);
+  if(s>=75) return pick(['いい感じだよ、お兄ちゃん！<br>このちょうしでいこ〜♪',
+    'バランスばっちり！<br>がんばってるの、ちゃんと見てるからね🍓']);
+  if(s>=60) return pick(['まあまあかな！<br>あと少しでもっと良くなるよ〜',
+    'わるくないよ！<br>つぎはもうひとがんばりしてみよ？']);
+  return pick(['きょうはちょっと乱れちゃったね。<br>でもだいじょうぶ、あしたがあるよ！',
+    'こんな日もあるある！<br>お兄ちゃんならすぐ戻せるよ🍓']);
+}
+
+/* ============================================================
    描画
    ============================================================ */
 function render(){
@@ -488,10 +564,14 @@ function renderScore(){
   const num = document.getElementById('scoreNum');
   const face = document.getElementById('adviceFace');
   const text = document.getElementById('adviceText');
+  const av = document.getElementById('imoutoAvatar');
+  const bub = document.getElementById('imoutoBubble');
   if(!sc){
     num.textContent='–'; arc.style.strokeDashoffset=264;
     face.textContent='きょうも記録がんばろ！';
     text.textContent='食事を記録するとスコアとアドバイスが出るよ。';
+    av.innerHTML = '<img src="'+imoutoImgSrc('normal')+'" alt="いちごちゃん">';
+    bub.innerHTML = imoutoLine(null);
     return;
   }
   num.textContent = sc.score;
@@ -502,6 +582,9 @@ function renderScore(){
   const msgs = sc.issues.slice(0,2).map(i=>i[1]);
   if(msgs.length===0) msgs.push('栄養バランスばっちり！この調子でいこ〜🍓');
   text.innerHTML = msgs.map(m=>'・'+m).join('<br>') + (ai?'<br>🍓 '+esc(ai):'');
+  const mood = moodOf(sc.score);
+  av.innerHTML = '<img src="'+imoutoImgSrc(mood)+'" alt="いちごちゃん">';
+  bub.innerHTML = ai ? esc(ai) : imoutoLine(sc);
 }
 
 function esc(s){ return String(s).replace(/[<>&"]/g, c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
