@@ -444,40 +444,68 @@ function totalsOf(d){
   return t;
 }
 
+/* その日の記録がどこまで進んでいるか（0〜1）。
+   朝だけなら25%、昼までなら60%、夜まで入れば100%として評価する。
+   ※過去の日（今日より前）は必ず100%扱い。 */
+function dayProgress(d){
+  const dd = DB.days[d];
+  if(!dd || !dd.meals) return 0;
+  const has = m => (dd.meals[m]||[]).length>0;
+  const isPast = d < todayStr();
+  if(isPast) return 1;                 // 過ぎた日は一日ぶんで評価
+  if(has('夜')) return 1;
+  if(has('昼')) return 0.6;
+  if(has('朝')) return 0.25;
+  if(has('間食')) return 0.2;
+  return 0;
+}
+
 function scoreOf(d){
   const t = totalsOf(d); if(t.n===0) return null;
-  const T = DB.targets;
+  const T0 = DB.targets;
+  const prog = dayProgress(d);
+  // 「これだけは摂ってほしい」系（カロリー・たんぱく質・繊維）は進み具合に合わせた目標に
+  const T = {
+    kcal: T0.kcal*prog, p: T0.p*prog, fib: T0.fib*prog,
+    // 上限系（脂質・塩分・糖質）は一日ぶんのままでOK＝途中で超えたらちゃんと警告
+    f: T0.f, salt: T0.salt, sugar: T0.sugar
+  };
+  const full = (prog>=1);           // 一日ぶん記録できているか
   let pts = 0; const issues = [];
 
-  // カロリー 30点（目標の75〜110%が満点。外れても急には落ちないゆるめカーブ）
+  // カロリー 30点（その時点の目標の75〜110%が満点）
   const r = t.kcal / T.kcal;
   if(r>=0.75 && r<=1.10) pts+=30;
-  else if(r<0.75){ pts += Math.max(0, 30 - (0.75-r)*60); if(r<0.55) issues.push(['kcal-low','ちょっと食べなさすぎかも？無理な減らしすぎはリバウンドのもとだよ！']); }
+  else if(r<0.75){
+    pts += Math.max(0, 30 - (0.75-r)*60);
+    // 食べなさすぎの警告は「一日ぶん記録できてから」だけ
+    if(full && r<0.55) issues.push(['kcal-low','ちょっと食べなさすぎかも？無理な減らしすぎはリバウンドのもとだよ！']);
+  }
   else { pts += Math.max(0, 30 - (r-1.10)*60); if(r>1.20) issues.push(['kcal-over',`カロリーオーバー気味…目標より${Math.round(t.kcal-T.kcal)}kcal多いよ。夜を軽めにしてみよ？`]); }
 
-  // たんぱく質 15点（目標以上で満点）
+  // たんぱく質 15点（その時点の目標以上で満点）
   const rp = t.p / T.p;
   pts += Math.min(15, 15*(rp/0.9));
-  if(rp<0.7) issues.push(['p-low','たんぱく質が足りないよ〜。お肉・お魚・卵・豆腐をプラスしよ！筋肉が減るとやせにくくなるからね']);
+  if(full && rp<0.7) issues.push(['p-low','たんぱく質が足りないよ〜。お肉・お魚・卵・豆腐をプラスしよ！筋肉が減るとやせにくくなるからね']);
 
-  // 脂質 10点（上限＋10%までは満点、そこから緩やかに）
+  // 脂質 10点（一日の上限＋10%までは満点）
   if(t.f<=T.f*1.10) pts+=10;
   else { pts+=Math.max(0, 10-(t.f-T.f*1.10)*0.2); issues.push(['f-over','脂質がちょっと多めかな。揚げ物は明日はお休みにしよっ']); }
 
-  // 塩分 15点（上限＋10%までは満点）
+  // 塩分 15点（一日の上限＋10%までは満点）
   if(t.salt<=T.salt*1.10) pts+=15;
   else { pts+=Math.max(0, 15-(t.salt-T.salt*1.10)*2); issues.push(['salt-over','塩分とりすぎ注意！汁物のスープは残すのがコツだよ']); }
 
-  // 食物繊維 15点
+  // 食物繊維 15点（その時点の目標）
   const rf = t.fib / T.fib;
   pts += Math.min(15, 15*(rf/0.9));
-  if(rf<0.6) issues.push(['fib-low','食物繊維が少なめ…野菜・きのこ・海藻をもう一皿！お通じにも効くよ🥦']);
+  if(full && rf<0.6) issues.push(['fib-low','食物繊維が少なめ…野菜・きのこ・海藻をもう一皿！お通じにも効くよ🥦']);
 
-  // 糖質 15点（上限＋10%までは満点）
+  // 糖質 15点（一日の上限＋10%までは満点）
   if(t.sugar<=T.sugar*1.10) pts+=15;
   else { pts+=Math.max(0, 15-(t.sugar-T.sugar*1.10)*0.1); issues.push(['sugar-over','糖質が多めだよ。ごはんの量をちょっとだけ減らしてみる？']); }
 
-  return {score: Math.round(Math.min(100,Math.max(0,pts))), issues, totals:t};
+  return {score: Math.round(Math.min(100,Math.max(0,pts))), issues, totals:t, prog, full};
 }
 
 function faceOf(s){
@@ -503,43 +531,65 @@ function moodOf(s){
 function imoutoImgSrc(mood){
   return mood + '.png';
 }
-/* 妹のひとこと（スコア＋その日の課題から選ぶ） */
+/* 妹のひとこと（スコア＋その日の課題＋記録の進み具合から選ぶ） */
 function imoutoLine(sc){
   if(!sc) return 'おかえり、お兄ちゃん！<br>きょうもいっしょに記録がんばろ〜🍓';
   const s = sc.score, t = sc.totals, T = DB.targets;
   const kinds = sc.issues.map(i=>i[0]);
   const pick = a => a[Math.floor(Math.random()*a.length)];
+  const full = sc.full;                       // 夜まで記録できてる？
+  const rest = Math.max(0, Math.round(T.kcal - t.kcal));   // あと何kcal食べられる
+  const restP = Math.max(0, Math.round(T.p - t.p));        // たんぱく質あと何g
 
-  // まず気になるところがあればそこを一言
+  // ---- 食べすぎ・とりすぎ系は途中でもちゃんと言う ----
   if(kinds.indexOf('kcal-over')>=0)
-    return pick(['きょうはちょっと食べすぎかも〜。<br>あしたは軽めにしよ？いっしょにがんばろ！',
-      'カロリーオーバーぎみだけど、<br>たまにはいい日もあるよ！むりしないでね🍓']);
-  if(kinds.indexOf('kcal-low')>=0)
-    return pick(['お兄ちゃん、あんまり食べてないよ…？<br>ちゃんと食べないと体こわしちゃう！',
-      'たりてないみたい…。<br>むりな減らしすぎはダメだからね？']);
-  if(kinds.indexOf('p-low')>=0)
-    return pick(['たんぱく質がちょっと少ないかも。<br>ゆで卵ひとつ足すだけでちがうよ〜💪',
-      'せっかく鍛えてるんだから、<br>たんぱく質もうちょっと摂ろ？おねがい！']);
+    return full
+      ? pick(['きょうはちょっと食べすぎかも〜。<br>あしたは軽めにしよ？いっしょにがんばろ！',
+          'カロリーオーバーぎみだけど、<br>たまにはいい日もあるよ！むりしないでね🍓'])
+      : pick(['もうけっこう食べてるね〜！<br>のこりは軽めにしとこ？',
+          'この時点でオーバーぎみ…！<br>このあとは野菜中心にしよっか🍓']);
   if(kinds.indexOf('salt-over')>=0)
     return pick(['塩分たかめ…！<br>おみそ汁とかスープ、のこすのがコツだよ〜',
-      'しょっぱいもの多かったね。<br>あしたは薄味でいこ？']);
+      'しょっぱいもの多いかも。<br>このあとは薄味でいこ？']);
   if(kinds.indexOf('f-over')>=0)
-    return pick(['あぶらもの多めだったかな〜。<br>あしたは蒸し料理とかどう？',
+    return pick(['あぶらもの多めかな〜。<br>つぎは蒸し料理とかどう？',
       '脂質ちょっと乗ってるね。<br>でもおいしかったならヨシ！🍓']);
   if(kinds.indexOf('sugar-over')>=0)
-    return pick(['あまいもの、いっぱい食べたね〜ふふ。<br>あしたはひかえめにしよっか！',
+    return pick(['あまいもの、いっぱい食べたね〜ふふ。<br>このあとはひかえめにしよっか！',
       '糖質おおめ！ごはんちょっとだけ減らすと<br>ぐっと変わるよ〜']);
-  if(kinds.indexOf('fib-low')>=0)
-    return pick(['食物繊維がすくないかも。<br>野菜と海藻、たしてみて〜🥦',
-      'おなかの調子のために<br>きのこや野菜もたべてほしいな！']);
 
-  // 問題なしのときはスコアでほめる
-  if(s>=90) return pick(['すっごーい！ほぼ完璧だよお兄ちゃん！<br>わたし、ほんとにうれしい🍓',
+  // ---- 不足系は「一日ぶん記録できてから」言う ----
+  if(full){
+    if(kinds.indexOf('kcal-low')>=0)
+      return pick(['お兄ちゃん、きょうあんまり食べてないよ…？<br>ちゃんと食べないと体こわしちゃう！',
+        'きょうはたりてないみたい…。<br>むりな減らしすぎはダメだからね？']);
+    if(kinds.indexOf('p-low')>=0)
+      return pick(['きょうはたんぱく質すくなかったね。<br>あしたはゆで卵ひとつ足してみよ〜💪',
+        'せっかく鍛えてるんだから、<br>あしたはたんぱく質もうちょっと摂ろ？']);
+    if(kinds.indexOf('fib-low')>=0)
+      return pick(['きょうは食物繊維がすくなかったかも。<br>あしたは野菜と海藻たしてみて〜🥦',
+        'おなかの調子のために<br>あしたはきのこや野菜もたべてほしいな！']);
+  }
+
+  // ---- まだ途中のとき：残りの目安をやさしく教える ----
+  if(!full){
+    if(restP>=25 && rest>=400)
+      return pick(['ここまでOK！<br>のこりでたんぱく質あと'+restP+'gくらい摂れるといいね💪',
+        'いい滑り出し〜！<br>あと'+rest+'kcalくらい余裕あるよ🍓']);
+    if(rest>=300)
+      return pick(['いまのところバランスいいよ〜！<br>のこりはあと'+rest+'kcalくらいが目安🍓',
+        'ここまでいい感じ！<br>つぎのごはんも楽しみだね〜♪']);
+    return pick(['ここまでいい感じだよ、お兄ちゃん！<br>このちょうしでいこ〜♪',
+      'ちゃんと記録できててえらい！<br>のこりも無理せずいこうね🍓']);
+  }
+
+  // ---- 一日ぶん記録できたときの総評 ----
+  if(s>=90) return pick(['すっごーい！きょうはほぼ完璧だよお兄ちゃん！<br>わたし、ほんとにうれしい🍓',
     'かんぺき！！<br>この調子ならぜったい結果でるよ〜💮']);
-  if(s>=75) return pick(['いい感じだよ、お兄ちゃん！<br>このちょうしでいこ〜♪',
-    'バランスばっちり！<br>がんばってるの、ちゃんと見てるからね🍓']);
-  if(s>=60) return pick(['まあまあかな！<br>あと少しでもっと良くなるよ〜',
-    'わるくないよ！<br>つぎはもうひとがんばりしてみよ？']);
+  if(s>=75) return pick(['きょうもいい一日だったね、お兄ちゃん！<br>バランスばっちりだったよ♪',
+    'がんばってるの、ちゃんと見てるからね🍓<br>おつかれさま！']);
+  if(s>=60) return pick(['きょうはまあまあかな！<br>あと少しでもっと良くなるよ〜',
+    'わるくないよ！<br>あしたはもうひとがんばりしてみよ？']);
   return pick(['きょうはちょっと乱れちゃったね。<br>でもだいじょうぶ、あしたがあるよ！',
     'こんな日もあるある！<br>お兄ちゃんならすぐ戻せるよ🍓']);
 }
@@ -577,7 +627,7 @@ function renderScore(){
   num.textContent = sc.score;
   arc.style.strokeDashoffset = 264*(1-sc.score/100);
   arc.style.stroke = sc.score>=75 ? '#37c78a' : sc.score>=50 ? '#ffb84a' : '#e04b5e';
-  face.textContent = faceOf(sc.score);
+  face.textContent = (sc.full ? '' : '【とちゅう経過】') + faceOf(sc.score);
   const ai = DB.days[CUR] && DB.days[CUR].aiAdvice;
   const msgs = sc.issues.slice(0,2).map(i=>i[1]);
   if(msgs.length===0) msgs.push('栄養バランスばっちり！この調子でいこ〜🍓');
